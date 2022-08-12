@@ -1,5 +1,7 @@
+from email.mime import base
 from urllib.parse import urlparse, urljoin
 import re
+from pathlib import Path
 import requests
 import os
 from urllib3.exceptions import InsecureRequestWarning
@@ -16,6 +18,18 @@ def read_file(filename):
 		print("Error opening or reading input file: ", ex)
 		exit()
 
+def remove_dir(directory):
+    try:
+        directory = Path(directory)
+        for item in directory.iterdir():
+            if item.is_dir():
+                remove_dir(item)
+            else:
+                item.unlink()
+        directory.rmdir()
+    except Exception as ex: # Ex always the exception
+        print(f"[X] Failed to delete {directory}")
+
 def create_dir(parrent_dir, new_dir):
     path = os.path.join(parrent_dir, new_dir)
     try:
@@ -23,40 +37,44 @@ def create_dir(parrent_dir, new_dir):
     except OSError as error:
         print("Failed creating dir")
 
-def download_local_asset(saved_path, url_root, url_file_path, asset_url, file_src, replace):
-    if asset_url[0] == "/": asset_fullurl = urljoin(url_root, asset_url)
-    else: asset_fullurl = urljoin(url_file_path, asset_url)
-    
-    # Clean Asset URL from unwanted char like anchor in url
-    asset_url = urlparse(asset_url).path
+def clean_backlash(url):
+    while "//" in url: url=url.replace("//", "/")
+    return url 
 
-    if asset_url[0] == "/": asset_path = os.path.join(saved_path, asset_url[1:]).replace("\\", "/")
-    else: asset_path = os.path.join(saved_path, asset_url).replace("\\", "/")
+def download_local_asset(saved_path, base_url, file_path, asset_url, file_src, replace, assets_stats):
+    if len(asset_url) <= 1: return
 
-    # Fix root path
     if asset_url[0] == "/":
-        old_content = read_file(file_src)
-        new_content = old_content.replace(replace, replace.replace(asset_url, asset_url[1:]))
-        with open(file_src, "w", encoding="utf-8") as f:
-            f.write(new_content)
+        asset_fullurl = urljoin(base_url, asset_url)
+        asset_path = os.path.normpath(urlparse(asset_url).path).replace("\\", "/")
+    else:
+        asset_fullurl = urljoin(urljoin(base_url, file_path), asset_url)
+        asset_path = os.path.normpath(urljoin(file_path, urlparse(asset_url).path)).replace("\\", "/")
+    
+    asset_dir = asset_path[:asset_path.rfind("/")]
+    print("\t[!] asset_fullurl", asset_fullurl)
+    print("\t[!] asset_path", asset_path)
+    print("\t[!] asset_dir", asset_dir)
 
-    print("Downloading assets", asset_fullurl, ":", end="")
+    # return
+    # Fix path from current edited file_src
+    old_content = read_file(file_src)
+    new_content = old_content.replace(replace, replace.replace(asset_url, asset_path))
+    with open(file_src, "w", encoding="utf-8") as f: f.write(new_content)
+
+    assets_stats["total"] += 1
+    print("\t[!] Downloading assets", asset_fullurl)
     req = requests.get(asset_fullurl, allow_redirects=False, verify=False)
-    print(req.status_code)
+    print(f"\t[!] RESP {req.status_code}")
 
     if req.status_code == 200:
-        asset_dir = asset_path[:asset_path.rfind("/")]
-        
-        print("ASSET_PATH", asset_path)
-        print("ASSET_DIR", asset_dir)
-        create_dir("", asset_dir)
-
-        with open(asset_path, "wb") as f:
-            f.write(req.content)
+        assets_stats["downloaded"] += 1
+        create_dir(saved_path, asset_dir)
+        with open(os.path.join(saved_path, asset_path), "wb") as f: f.write(req.content)
 
         # CHECK IF ASSET IS CSS AND HAS LOCAL URL
         parsed = urlparse(asset_fullurl)
-        asset_filetype = parsed.path[parsed.path.rfind(".")+1:]
+        asset_filetype = parsed.path[parsed.path.rfind(".")+1:].lower()
         if asset_filetype == "css":
             pattern = r"(?<=url\().*?(?=\))"
             matches = re.finditer(pattern, req.text, re.MULTILINE)
@@ -68,22 +86,35 @@ def download_local_asset(saved_path, url_root, url_file_path, asset_url, file_sr
                     css_localcontent_url = css_localcontent[1:-1]
 
                 if urlparse(css_localcontent_url).scheme == "":
-                    download_local_asset(asset_dir, url_root, url_file_path, css_localcontent_url, asset_path, f"url({css_localcontent})")
+                    print("\n\t[!] FOUND NEW ASSETS", css_localcontent_url)
+                    css_parsed = urlparse(asset_fullurl)
+                    css_file_path = os.path.normpath(css_parsed.path[:css_parsed.path.rfind("/")+1]).replace("\\", "/") + "/"
+
+                    download_local_asset(asset_dir, base_url, css_file_path, css_localcontent_url, os.path.join(saved_path, asset_path), f"url({css_localcontent})", assets_stats)
 
 def save_webpage(url, html_content="", saved_path="result"):
-    print("SAVING", url)
-    parsed = urlparse(url)
-    url_root = parsed.scheme + "://" + parsed.netloc + "/"
-    url_file_path = parsed.scheme + "://" + parsed.netloc + "/" + parsed.path[:parsed.path.rfind("/")]
+    print("[!] SAVING", url)
+    remove_dir(saved_path)
+    create_dir("", saved_path)
+
+    parsed = urlparse(url)    
+    base_url = parsed.scheme + "://" + parsed.netloc + "/"
+    file_path = os.path.normpath(parsed.path[:parsed.path.rfind("/")+1]).replace("\\", "/") + "/"
+    if len(file_path) > 0: file_path = file_path[1:]
+        
+    # Detect how many "../" needed to go to root folder
+    count_parrentdir = file_path.count('/')
+    index_path = os.path.join(saved_path, "index.html").replace("\\", "/")
+
+    print("[!] base_url", base_url)
+    print("[!] file_path", file_path)
+    print("[!] count_parrentdir", count_parrentdir)
 
     if html_content == "":
-        req = requests.get(url, verify=False, allow_redirects=False)
-        req.encoding = "utf-8"
-        html_content=req.text
-        print(html_content)
-    
+        req = requests.get(url, verify=False, allow_redirects=False); req.encoding = "utf-8"; html_content=req.text
+
     # Write HTML first
-    with open(os.path.join(saved_path, "index.html").replace("\\", "/"), "w", encoding="utf-8") as f:
+    with open(index_path, "w", encoding="utf-8") as f:
         f.write(html_content)
 
     html_tag_cssjs = {
@@ -91,6 +122,7 @@ def save_webpage(url, html_content="", saved_path="result"):
         "script" : "src"
     }
 
+    assets_stats = {"downloaded":0, "total":0}
     for tag in html_tag_cssjs.keys():
         pattern = fr"(?<=<{tag}).*?(?=>)"
         matches = re.finditer(pattern, html_content, re.MULTILINE)
@@ -107,12 +139,18 @@ def save_webpage(url, html_content="", saved_path="result"):
                 rquote = match2.group(2)
 
                 replace = f"{lquote}{asset_url}{rquote}"
-                print("\nFOUND", replace)
+                print("\n[!] FOUND ASSET", replace)
 
                 # DOWNLOAD ASSET IF LOCAL ASSET
                 if urlparse(asset_url).scheme == "":
-                    download_local_asset(saved_path, url_root, url_file_path, asset_url, os.path.join(saved_path, "index.html"), replace)
-                    
+                    download_local_asset(saved_path, base_url, file_path, asset_url, index_path, replace, assets_stats)
+    
+    if assets_stats["total"] == 0: return 0.0
+    return float(assets_stats["downloaded"]/assets_stats["total"])
 
-url = "https://openphish.com/"
-save_webpage(url)
+html_text = read_file("dom_sample.html")
+url = "https://paypol.kmgmgmc.cn/customer_center//confirm-account589/myaccount/signin/?country.x=DE&"
+# url = "https://paypol.kmgmgmc.cn/asdad"
+
+asset_downloaded = save_webpage(url)
+print("assets_downloaded", asset_downloaded)
