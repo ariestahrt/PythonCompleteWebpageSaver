@@ -17,4 +17,4 @@ pyautogui.typewrite("Webpage Download")
 pyautogui.hotkey('enter')
 ```
 
-I made this in case I want to save a website with a specific HTML document in the past from an archive website provider (e.g. urlscan.io).
+But that solution will not save the page with all assets like assets that coming from the CSS file. This is the best solution for you to save the whole page to be accessible 100% offline.

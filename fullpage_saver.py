@@ -112,6 +112,7 @@ def save_webpage(url, html_content="", saved_path="result"):
 
     if html_content == "":
         req = requests.get(url, verify=False, allow_redirects=False); req.encoding = "utf-8"; html_content=req.text
+        # print(html_content)
 
     # Write HTML first
     with open(index_path, "w", encoding="utf-8") as f:
@@ -148,9 +149,9 @@ def save_webpage(url, html_content="", saved_path="result"):
     if assets_stats["total"] == 0: return 0.0
     return float(assets_stats["downloaded"]/assets_stats["total"])
 
-html_text = read_file("dom_sample.html")
-url = "https://paypol.kmgmgmc.cn/customer_center//confirm-account589/myaccount/signin/?country.x=DE&"
-# url = "https://paypol.kmgmgmc.cn/asdad"
+# html_text = read_file("dom_sample.html")
+url = "https://www.paypal.com/signin?"
+# url = "https://www.amazon.com/ap/signin?openid.pape.max_auth_age=0&openid.return_to=https%3A%2F%2Fwww.amazon.com%2F%3Fref_%3Dnav_custrec_signin&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.assoc_handle=usflex&openid.mode=checkid_setup&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0&"
 
 asset_downloaded = save_webpage(url)
 print("assets_downloaded", asset_downloaded)
